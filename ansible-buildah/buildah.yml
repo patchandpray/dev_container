@@ -1,0 +1,68 @@
+#!/usr/bin/env ansible-playbook
+# Builds a container using buildah from a scratch temporary buildcontainer
+---
+- name: buildah
+  hosts: localhost
+  vars:
+    build_from: scratch
+    container_name: buildcontainer
+    image_name: example_container_image
+    image_version: latest
+    container_ports:
+      - 80
+      - 8080
+    base_packages:
+      - bash
+      - coreutils
+
+  tasks:
+  - name: check for buildah
+    dnf:
+      name: buildah
+      state: present
+
+  - name: remove previous existing buildimage with ignore_errors
+    command: "buildah rm {{ container_name }}"
+    ignore_errors: True
+
+  - name: create a buildah working image from scratch
+    command: "buildah from --name {{ container_name }} {{ build_from }}"
+    register: container-name
+
+  - command: buildah containers
+
+  - name: buildah mount
+    command: "buildah mount {{ container_name }}"
+    register: mountpoint
+
+  - name: install base packages
+    dnf:
+      name: "{{ item }}"
+      installroot: "{{ mountpoint.stdout }}"
+      state: present
+    with_items: "{{ base_packages }}"
+
+  - name: copy entrypoint using buildah
+    command: "buildah copy {{ container_name }} ./files/bashecho.sh /usr/bin"
+
+  - name: buildah configure default command
+    command: "buildah config --cmd /usr/bin/bashecho.sh {{ container_name }}"
+
+  - name: open some ports
+    command: "buildah config --port {{ item }} {{ container_name }}"
+    with_items: "{{ container_ports }}"
+
+  - name: buildah run
+    command: "buildah run {{ container_name }}"
+
+  - name: umount the container so we can commit it
+    command: "buildah unmount {{ container_name }}" 
+
+  - name: commit {{ container_name }} as {{ image_name }}
+    command: "buildah commit {{ container_name }} {{ image_name}}"
+
+#  - name: buildah push the committed image
+#    command: "buildah push {{ image_name }} {{ image_name }}:{{ image_version }}"
+
+  - name: cleanup working container {{ container_name }}
+    command: "buildah rm {{ container_name }}" 
